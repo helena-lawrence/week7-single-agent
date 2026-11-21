@@ -1,0 +1,6 @@
+[
+  {"question":"What is 250 multiplied by 12?", "expected_tools":["calculate"]},
+  {"question":"What time is it in London right now?", "expected_tools":["get_current_time"]},
+  {"question":"Explain RAG according to the study notes.", "expected_tools":["search_study_notes"]},
+  {"question":"How many sessions of 45 minutes to study for 10 hours?", "expected_tools":["estimate_study_sessions"]}
+]

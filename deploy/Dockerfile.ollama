@@ -1,0 +1,7 @@
+# Build this image once and push it to a third ECR repository.
+# For production, pin ollama/ollama to a tested version or digest.
+FROM ollama/ollama:latest
+COPY deploy/start-ollama.sh /start-ollama.sh
+RUN chmod +x /start-ollama.sh
+ENV OLLAMA_HOST=127.0.0.1:11434 OLLAMA_MODEL=llama3.2:3b OLLAMA_MODELS=/models
+ENTRYPOINT ["/bin/sh", "/start-ollama.sh"]

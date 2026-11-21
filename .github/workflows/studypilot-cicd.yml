@@ -1,0 +1,164 @@
+name: StudyPilot CI/CD (Fargate + Ollama)
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studypilot-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  tests:
+    name: Python tests and syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
+      - name: Run unit tests (no Ollama or AWS needed)
+        env:
+          RETRIEVAL_MODE: keyword
+        run: python -m pytest tests -q
+      - name: Validate Python syntax
+        run: python -m compileall -q .
+
+  deploy:
+    name: Build, push and deploy to ECS
+    needs: tests
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'production' || 'staging' }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+      ECS_API_SERVICE: ${{ vars.ECS_API_SERVICE }}
+      ECS_UI_SERVICE: ${{ vars.ECS_UI_SERVICE }}
+      ECR_API_REPOSITORY: ${{ vars.ECR_API_REPOSITORY }}
+      ECR_UI_REPOSITORY: ${{ vars.ECR_UI_REPOSITORY }}
+      PRODUCTION_READY: ${{ vars.PRODUCTION_READY }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Check environment and release policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          for value in AWS_REGION ECS_CLUSTER ECS_API_SERVICE ECS_UI_SERVICE ECR_API_REPOSITORY ECR_UI_REPOSITORY; do
+            test -n "${!value}" || { echo "Missing environment variable: $value"; exit 1; }
+          done
+          test -n "${{ vars.AWS_ROLE_TO_ASSUME }}" || { echo "Missing environment variable: AWS_ROLE_TO_ASSUME"; exit 1; }
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            [[ "$PRODUCTION_READY" == "true" ]] || { echo 'Production is blocked: production hardening not yet approved.'; exit 1; }
+            git fetch origin main
+            git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo 'Release commit must be on main.'; exit 1; }
+          fi
+      - name: Configure short-lived AWS credentials via GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: studypilot-${{ github.run_id }}
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Build and push both application images
+        id: images
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="sha-${GITHUB_SHA:0:12}"
+          api_image="${REGISTRY}/${ECR_API_REPOSITORY}:${tag}"
+          ui_image="${REGISTRY}/${ECR_UI_REPOSITORY}:${tag}"
+          docker build --pull -f deploy/Dockerfile.api -t "$api_image" .
+          docker build --pull -f deploy/Dockerfile.ui -t "$ui_image" .
+          docker push "$api_image"
+          docker push "$ui_image"
+          echo "api_image=$api_image" >> "$GITHUB_OUTPUT"
+          echo "ui_image=$ui_image" >> "$GITHUB_OUTPUT"
+      - name: Download current ECS task definitions (preserve sidecar, secrets and EFS)
+        shell: bash
+        run: |
+          set -euo pipefail
+          api_td=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_API_SERVICE" --query 'services[0].taskDefinition' --output text)
+          ui_td=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_UI_SERVICE" --query 'services[0].taskDefinition' --output text)
+          [[ "$api_td" != "None" && "$ui_td" != "None" ]] || { echo 'Create both ECS services before enabling deployment.'; exit 1; }
+          aws ecs describe-task-definition --task-definition "$api_td" --query taskDefinition > api-task.json
+          aws ecs describe-task-definition --task-definition "$ui_td" --query taskDefinition > ui-task.json
+          python deploy/scripts/prepare_task_definition.py api-task.json api-clean.json api
+          python deploy/scripts/prepare_task_definition.py ui-task.json ui-clean.json ui
+      - name: Render FastAPI container image (preserves Ollama sidecar)
+        id: api-task
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: api-clean.json
+          container-name: api
+          image: ${{ steps.images.outputs.api_image }}
+      - name: Deploy API task to ECS
+        id: api-deploy
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.api-task.outputs.task-definition }}
+          service: ${{ vars.ECS_API_SERVICE }}
+          cluster: ${{ vars.ECS_CLUSTER }}
+          wait-for-service-stability: true
+          wait-for-minutes: 60
+          wait-max-delay-seconds: 15
+      - name: Confirm API deployment has not rolled back
+        env:
+          EXPECTED_TASK_DEF: ${{ steps.api-deploy.outputs.task-definition-arn }}
+          SERVICE: ${{ vars.ECS_API_SERVICE }}
+        shell: bash
+        run: python deploy/scripts/verify_service.py "$ECS_CLUSTER" "$SERVICE" "$EXPECTED_TASK_DEF"
+      - name: Render Streamlit container image
+        id: ui-task
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ui-clean.json
+          container-name: ui
+          image: ${{ steps.images.outputs.ui_image }}
+      - name: Deploy UI task to ECS
+        id: ui-deploy
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.ui-task.outputs.task-definition }}
+          service: ${{ vars.ECS_UI_SERVICE }}
+          cluster: ${{ vars.ECS_CLUSTER }}
+          wait-for-service-stability: true
+          wait-for-minutes: 40
+          wait-max-delay-seconds: 15
+      - name: Confirm UI deployment has not rolled back
+        env:
+          EXPECTED_TASK_DEF: ${{ steps.ui-deploy.outputs.task-definition-arn }}
+          SERVICE: ${{ vars.ECS_UI_SERVICE }}
+        shell: bash
+        run: python deploy/scripts/verify_service.py "$ECS_CLUSTER" "$SERVICE" "$EXPECTED_TASK_DEF"
+      - name: Summary
+        run: |
+          echo "## StudyPilot deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "- AWS region: ${AWS_REGION}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Cluster: ${ECS_CLUSTER}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- API task: ${{ steps.api-deploy.outputs.task-definition-arn }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- UI task: ${{ steps.ui-deploy.outputs.task-definition-arn }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Further functional smoke tests and approved external checks are required before production sign-off." >> "$GITHUB_STEP_SUMMARY"

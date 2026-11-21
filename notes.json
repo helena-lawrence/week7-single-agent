@@ -1,0 +1,7 @@
+[
+  {"topic":"RAG", "keywords":["rag","retrieval","vector","embedding"], "explanation":"Retrieval-Augmented Generation searches external knowledge and gives relevant passages to an LLM before it answers."},
+  {"topic":"AI Agent", "keywords":["agent","agentic"], "explanation":"An AI agent can use an LLM to decide which allowed tool to request next and use the tool result to complete a goal."},
+  {"topic":"Tool calling", "keywords":["tool","function calling"], "explanation":"The LLM produces a structured tool request, the application runs the Python function, and the result is returned to the LLM."},
+  {"topic":"LangGraph", "keywords":["langgraph","graph","checkpoint"], "explanation":"LangGraph supports stateful agent execution with nodes, edges, checkpoints and optional human approval."},
+  {"topic":"MCP", "keywords":["mcp","model context protocol"], "explanation":"Model Context Protocol standardises how AI applications connect to tools and data exposed by MCP servers."}
+]

@@ -1,0 +1,5 @@
+# All integrations for one Docker image; larger download than the local-only requirements.
+-r requirements-rag.txt
+-r requirements-api.txt
+-r requirements-aws.txt
+-r requirements-observability.txt

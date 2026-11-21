@@ -1,0 +1,3 @@
+Add real text-based study PDFs to this folder and run: python ingest_pdfs.py
+Examples: RAG.pdf, LLM.pdf, LangGraph.pdf, Agentic_AI.pdf
+Scanned image-only PDFs require an OCR step before this script can read their text.

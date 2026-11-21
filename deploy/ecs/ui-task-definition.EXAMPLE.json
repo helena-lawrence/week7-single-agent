@@ -1,0 +1,39 @@
+{
+  "family": "studypilot-ui-staging",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "runtimePlatform": {"operatingSystemFamily": "LINUX", "cpuArchitecture": "X86_64"},
+  "executionRoleArn": "REPLACE_ECS_EXECUTION_ROLE_ARN",
+  "taskRoleArn": "REPLACE_ECS_TASK_ROLE_ARN",
+  "containerDefinitions": [
+    {
+      "name": "ui",
+      "image": "REPLACE_ECR_UI_IMAGE_URI",
+      "essential": true,
+      "portMappings": [{"containerPort": 8501, "protocol": "tcp"}],
+      "environment": [
+        {"name": "API_URL", "value": "http://REPLACE_INTERNAL_API_DNS_OR_ALB:8000"}
+      ],
+      "secrets": [
+        {"name": "AGENT_API_KEY", "valueFrom": "REPLACE_SECRETS_MANAGER_API_KEY_ARN"}
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=5)\" || exit 1"],
+        "interval": 30,
+        "timeout": 8,
+        "retries": 3,
+        "startPeriod": 90
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/studypilot-ui-staging",
+          "awslogs-region": "eu-west-2",
+          "awslogs-stream-prefix": "ui"
+        }
+      }
+    }
+  ]
+}

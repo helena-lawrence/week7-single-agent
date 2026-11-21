@@ -1,0 +1,4 @@
+-r requirements.txt
+# Phase 3: first model download may take time; Python 3.12 recommended
+qdrant-client>=1.12
+sentence-transformers>=3.0

@@ -1,0 +1,87 @@
+{
+  "family": "studypilot-api-staging",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "4096",
+  "memory": "16384",
+  "runtimePlatform": {"operatingSystemFamily": "LINUX", "cpuArchitecture": "X86_64"},
+  "executionRoleArn": "REPLACE_ECS_EXECUTION_ROLE_ARN",
+  "taskRoleArn": "REPLACE_ECS_TASK_ROLE_ARN",
+  "volumes": [
+    {
+      "name": "ollama-models",
+      "efsVolumeConfiguration": {
+        "fileSystemId": "REPLACE_EFS_FILE_SYSTEM_ID",
+        "transitEncryption": "ENABLED",
+        "authorizationConfig": {
+          "accessPointId": "REPLACE_EFS_ACCESS_POINT_ID",
+          "iam": "ENABLED"
+        }
+      }
+    }
+  ],
+  "containerDefinitions": [
+    {
+      "name": "ollama",
+      "image": "REPLACE_ECR_OLLAMA_IMAGE_URI",
+      "essential": true,
+      "portMappings": [{"containerPort": 11434, "protocol": "tcp"}],
+      "environment": [
+        {"name": "OLLAMA_MODEL", "value": "llama3.2:3b"},
+        {"name": "OLLAMA_HOST", "value": "127.0.0.1:11434"},
+        {"name": "OLLAMA_MODELS", "value": "/models"}
+      ],
+      "mountPoints": [{"sourceVolume": "ollama-models", "containerPath": "/models", "readOnly": false}],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "ollama show llama3.2:3b >/dev/null 2>&1 || exit 1"],
+        "interval": 30,
+        "timeout": 10,
+        "retries": 4,
+        "startPeriod": 300
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/studypilot-api-staging",
+          "awslogs-region": "eu-west-2",
+          "awslogs-stream-prefix": "ollama"
+        }
+      }
+    },
+    {
+      "name": "api",
+      "image": "REPLACE_ECR_API_IMAGE_URI",
+      "essential": true,
+      "dependsOn": [{"containerName": "ollama", "condition": "HEALTHY"}],
+      "portMappings": [{"containerPort": 8000, "protocol": "tcp"}],
+      "environment": [
+        {"name": "LLM_PROVIDER", "value": "ollama"},
+        {"name": "OLLAMA_MODEL", "value": "llama3.2:3b"},
+        {"name": "OLLAMA_BASE_URL", "value": "http://127.0.0.1:11434"},
+        {"name": "RETRIEVAL_MODE", "value": "qdrant"},
+        {"name": "QDRANT_URL", "value": "REPLACE_PRIVATE_OR_AUTHORIZED_QDRANT_URL"},
+        {"name": "QDRANT_COLLECTION", "value": "ai_study_notes"},
+        {"name": "EMBEDDING_MODEL", "value": "sentence-transformers/all-MiniLM-L6-v2"}
+      ],
+      "secrets": [
+        {"name": "AGENT_API_KEY", "valueFrom": "REPLACE_SECRETS_MANAGER_API_KEY_ARN"},
+        {"name": "QDRANT_API_KEY", "valueFrom": "REPLACE_SECRETS_MANAGER_QDRANT_KEY_ARN"}
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)\" || exit 1"],
+        "interval": 30,
+        "timeout": 8,
+        "retries": 3,
+        "startPeriod": 120
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/studypilot-api-staging",
+          "awslogs-region": "eu-west-2",
+          "awslogs-stream-prefix": "api"
+        }
+      }
+    }
+  ]
+}

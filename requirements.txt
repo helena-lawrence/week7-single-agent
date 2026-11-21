@@ -1,0 +1,7 @@
+# Phase 1, 2, 4: small local CLI agent
+langchain>=1.0,<2.0
+langchain-ollama>=1.0,<2.0
+langgraph>=1.0,<2.0
+langgraph-checkpoint-sqlite>=2.0
+python-dotenv>=1.0
+tzdata

@@ -1,0 +1,3 @@
+-r requirements.txt
+# Phase 7
+langfuse>=3.0
