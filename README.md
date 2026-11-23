@@ -249,4 +249,6 @@ python -m pytest -q
 - [AWS Bedrock Converse API](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference.html)
 - [AWS ECS task IAM roles](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-iam-roles.html)
 
-For an explicit **ECR push + ECS console deployment checklist**, see `AWS_DEPLOYMENT.md`. The AWS stage is a guided deployment path, not an already deployed service.
+For the staging prerequisites, Qdrant provisioning, Service Connect wiring, and
+CI deployment sequence, see [AWS_DEPLOYMENT.md](./AWS_DEPLOYMENT.md). These are
+deployment instructions; AWS resources have not been provisioned by this guide.
